@@ -1,2 +1,20 @@
 # Notes-on-Geospatial-Health-Data
 Notes and R code resulting from coding along with Paula Moraga through her book *Geospatial Health Data: Modeling and Visualization with R-INLA and Shiny* 
+
+## Chapters
+- [ ] `1. Geospatial Health`
+- [ ] `2. Spatial Data and R Packages for Mapping`
+- [ ] `3. Bayesian Inference and INLA`
+- [ ] `4. The R-INLA Package`
+- [ ] `5. Areal Data`
+- [ ] `6. Spatial Modeling of Areal Data`
+- [ ] `7. Spatio-Temporal Modeling of Areal Data`
+- [ ] `8. Geostatistical Data` 
+- [ ] `9. Spatial Modeling of Geostatistical Data` 
+- [ ] `10. Spatio-Temporal Modeling of Geostatistical Data` 
+- [ ] `11. Introduction to R Markdown`
+- [ ] `12. Building a Dashboard to Visualize Spatial Data`
+- [ ] `13. Introduction to Shiny`
+- [ ] `14. Interactive Dashboards`
+- [ ] `15. Building a Shiny App`
+- [ ] `16. Disease Surveillance with SpatialEpiApp`
