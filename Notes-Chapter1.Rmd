@@ -1,0 +1,41 @@
+---
+title: "Chapter 1 - Geospatial Health"
+author: "The Caveman Coder"
+date: "2025-12-29"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+## Geospatial Health Data
+
+- provides information to identify health problems when they occur.  
+- crucial to prevent and control infectious diseases, non-communicable diseases, injuries, and other health conditions.  
+- one of the earliest examples is John Snow's cholera-outbreak investigation in 1854 which helped identify the source of infection (a public water pump on Broad Street).  
+
+
+## Disease Mapping
+
+- provides a visual summary of spatial information  
+- allows identification of patterns that may be missed when data are presented in tabular format.  
+
+
+## Communication of Results
+
+- Do not forget that the goal here is not to merely collect data for analysis, but to guide public health policy and action and help control and/or prevent diseases.  
+- target audience: health agencies, governments, private organizations, potentially exposed individuals, general public, etc. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+

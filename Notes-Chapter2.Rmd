@@ -1,0 +1,308 @@
+---
+title: "Notes-Chapter2"
+author: "The Caveman Coder"
+date: "2025-12-29"
+output: html_document
+---
+
+# Chapter 2: Spatial data and R packages for mapping
+
+## Types of spatial data
+
+- **areal data:** data domain is partitioned to a finite number of areal units. Examples: attributes collected by ZIP code, or remotely-sensed data reported by pixels.  
+- **geostatistical data:** the domain is a continuous fixed set.  
+- **point patterns:** data domain is random.    
+
+
+Example of areal data:
+```{r}
+library(sf)
+library(ggplot2)
+library(viridis)
+
+nc <- st_read(
+  system.file("shape/nc.shp", package = "sf"),
+  quiet = TRUE
+)
+
+head(nc)
+```
+
+Plot of the example areal data:
+```{r}
+ggplot(
+  data = nc,
+  aes(fill = SID74)
+) +
+  geom_sf() +
+  scale_fill_viridis() +
+  theme_bw() +
+  labs(
+    caption = "Sudden infant deaths in North Carolina in 1974."
+  )
+```
+
+Example of geostatistical data:
+```{r}
+library(geoR)
+library(dplyr)
+
+glimpse(parana)
+head(parana, 5)
+```
+
+Plot of the example geostatistical data:
+```{r}
+ggplot(
+  data.frame(cbind(parana$coords, Rainfall = parana$data))
+) + 
+  geom_point(
+    aes(east, north, color = Rainfall),
+    size = 2
+  ) +
+  scale_color_gradient(low = "blue", high = "orange") +
+  geom_path(
+    data = data.frame(parana$border),
+    aes(east, north)
+  ) +
+  theme_bw() +
+  labs(
+    caption = "Average rainfall measured at 143 recording stations in Parana state, Brazil."
+  )
+```
+
+
+Example of point patterns:
+```{r}
+library(cholera)
+
+head(fatalities)
+```
+
+Plot of the example point patterns:
+```{r}
+rng <- mapRange()
+
+plot(fatalities[, c("x", "y")],
+     pch = 15, col = "black",
+     cex = 0.5,
+     xlim = rng$x,
+     ylim = rng$y,
+     asp = 1,
+     frame.plot = FALSE, 
+     axes = FALSE, 
+     xlab = "", ylab = ""
+)
+addRoads()
+```
+John Snow's map of the 1854 London cholera outbreak. 
+
+
+## Coordinate reference systems
+
+Locations on Earth can be referenced using unprojected (or geographic) or projected coordinate reference systems.  
+- Unprojected/geographic reference systems use longitude and latitude for referencing a location on the Earth's 3d surface.  
+- Projected coordinate reference systems use easting northing Cartesian coordinates for referencing a location on a 2d representation of the Earth
+
+### Geographic coordinate systems
+
+- Latitude and longitude are angles given in decimal degrees (DM) or in degrees, minutes, seconds (DMS).  
+- The prime meridian passes through the British Royal Observatory in Greenwich, England.  
+- The prime meridian determines the eastern and western hemispheres.  
+Longitude values range from -180 degrees when running west to 180 degrees when running east.  
+
+
+### Projected coordinate systems
+
+Since a map projection is a transformation of the Earth's 3d surface as a flat, 2d plane, all map projections distort the Earth's surface in some way.  
+
+The Mercator projection preserves local angles and shapes (useful in navigation especially during the Age of Exploration), but distorts the land area.  
+
+- A variant of the original Mercator projection, called the Universal Transverse Mercator (UTM), divides the Earth into 60 zones of 6 degrees of longitude in width.  
+- Each of the zones uses a transverse Mercator projection that maps a region of large north-south extent.  
+- A position on Earth is givben by the UTM zone number, the hemisphere, and the easting and northing coordinates in the zone, measured in meters.  
+
+
+### Setting Coordinate Reference Systems in R
+
+- The Earth's shape is not a perfect sphere. It is an oblate spheroid that bulges at the equator and is flattened at the poles.  
+- The most common reference ellipsoid in use is called WGS84 or World Geodetic System.  
+- WGS84 is used by the Global Positioning System (GPS).  
+- The position of the model ellipsoid relative to the center of the Earth defined by the **datum**. The datum provides the origin point and defines the direction of the coordinate axes.  
+
+Script that defines the WGS84 longitude/latitude projection in R:
+```r
+"+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
+```
+
+Another common reference system is the one used by the European Petroleum Survey Group and is known as the EPSG code.  
+- The EPSG equivalent of WGS84 projection is 4326.  
+- Other EPSG codes of commonly-used projections can be found on http://www.spatialreference.org.  
+
+
+## Shapefiles  
+
+A popular storage format for geographic data is the shapefile format, which contains three mandatory files with the following extensions:  
+- `.shp`: contains the geometry data,
+- `.shx`: contains the positional index of the geometry data.  
+- `.dbf`: contains the attributes for each shape.  
+
+Optional files can have the following extension names:  
+- `.prj`: plain text file that describes the projection  
+- `.sbn` and `.sbx`: contains the spatial index of the geometry data  
+- `.shp` and `.xml`: contains geospatial metadata in XML format.  
+
+Reading shapefiles using the function `st_read()` from the **sf** package:
+```{r}
+# getting the shapefiles for North Carolina
+nameshp <- system.file("shape/nc.shp", package = "sf")
+
+# read the shapefile using st_read()
+map <- st_read(nameshp, quiet = TRUE)
+
+class(map)
+head(map)
+```
+
+Plotting different maps from the above sample shapefile (North Carolina):
+```{r}
+plot(map)
+```
+
+
+## Making maps with R
+
+Mapping with R is commonly done using packages like **ggplot2**, **leaflet**, **mapview**, and **tmap**.
+
+### Mapping with ggplot2
+
+Example:
+```{r}
+library(sf)
+library(ggplot2)
+
+nameshp <- system.file("shape/nc.shp", package = "sf")
+map <- st_read(nameshp, quiet = TRUE)
+ggplot(map) +
+  geom_sf(aes(fill = SID74)) +
+  theme_bw() +
+  labs(caption = "Map of sudden infant deaths in North Carolina in 1974, created with ggplot2.")
+```
+
+The default color scale for discrete variables is `scale_*_hue()`.  
+
+Modifying the plot by using a different color scale (viridis scale):
+```{r}
+ggplot(map) +
+  geom_sf(aes(fill = SID74)) +
+  scale_fill_viridis() +
+  labs(caption = "Map of sudden infant deaths in North Carolina in 1974, created with ggplot2 and viridis scale.")
+```
+
+Saving a plot produced with **ggplot2** is usually done using the `ggsave()` function. 
+
+Alternative way to save the plot: first specify the device driver (`png`, `pdf`, etc.), printing the plot, then shutting down the device using `dev.off()`.
+```{r}
+png("plot.png")
+ggplot(map) + 
+  geom_sf(aes(fill = SID74)) +
+  scale_fill_viridis() +
+  labs(caption = "Map of sudden infant deaths in North Carolina in 1974, created with ggplot2 and viridis scale.") +
+  theme_bw()
+dev.off()
+```
+
+To create animated or interactive plots, we can use the **gganimate** or **plotly** packages, respectively, in combination with **ggplot2**.  
+
+
+### leaflet
+
+For making interactive maps, **leaflet** is a popular choice. It is an open-source JavaScript-based library. 
+
+### Example using leaflet
+
+Checking the current coordinate reference system using `st_crs()`:
+```{r}
+st_crs(map)
+```
+
+Transforming the CRS of our map to ESPG 4326:
+```{r}
+map <- st_transform(map, 4326)
+st_crs(map)
+```
+
+Defining the desired color palette using `colorNumeric()` and plotting the map using `leaflet():
+```{r}
+library(leaflet)
+
+pal <- colorNumeric("YlOrRd", domain = map$SID74)
+
+leaflet(map) |> 
+  addTiles() |> 
+  addPolygons(
+    color = "white", fillColor = ~ pal(SID74),
+    fillOpacity = 1
+  ) |> 
+  addLegend(pal = pal, values = ~ SID74, opacity = 1) 
+```
+Map of sudden infant deaths in North Carolina in 1974, created with leaflet.
+
+
+### mapview
+
+The **mapview** package allows users to very quickly create interactive visualizations (useful during EDA).  
+
+Example of an interactive map created using `mapview()`:
+```{r}
+library(mapview)
+mapview(map, zcol = "SID74")
+```
+
+Adding customizations to `mapview()`:
+```{r}
+library(RColorBrewer)
+pal <- colorRampPalette(brewer.pal(9, "YlOrRd"))
+
+mapview(
+  map,
+  zcol = "SID74",
+  map.types = "CartoDB.DarkMatter",
+  col.regions = pal
+)
+```
+
+The function `sync()` can be used to produce a lattice-like view of multiple maps created with mapview or leaflet, that zoom and pan in a synchronized manner.
+
+Example of maps that feature synchronized panning and zooming:
+```{r}
+library(leafsync)
+
+m74 <- mapview(map, zcol = "SID74")
+m79 <- mapview(map, zcol = "SID79")
+
+m <- leafsync::sync(m74, m79)
+m
+```
+Synchronized maps of sudden infant deaths in North Carolina in 1974 and 1979. 
+
+
+### tmap
+
+The **tmap** package is used to generate thematic maps. To create thematic maps under this package, a base map is first created using the `tm_shape()` function, then layers are added using the `tm_*()` family of functions. Setting the `tmap_mode()` to `"plot"` produces static maps, and setting the former to `"view:` produces interactive maps.
+
+Example using **tmap** to create an interactive map:
+```{r}
+library(tmap)
+
+tmap_mode("view")
+tm_shape(map) +
+  tm_polygons("SID74")
+```
+
+
+
+
+
+
+

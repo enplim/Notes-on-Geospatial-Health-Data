@@ -2,8 +2,8 @@
 Notes and R code resulting from coding along with Paula Moraga through her book *Geospatial Health Data: Modeling and Visualization with R-INLA and Shiny* 
 
 ## Chapters
-- [ ] `1. Geospatial Health`
-- [ ] `2. Spatial Data and R Packages for Mapping`
+- [x] `1. Geospatial Health`
+- [x] `2. Spatial Data and R Packages for Mapping`
 - [ ] `3. Bayesian Inference and INLA`
 - [ ] `4. The R-INLA Package`
 - [ ] `5. Areal Data`
