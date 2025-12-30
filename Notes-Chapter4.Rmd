@@ -1,0 +1,250 @@
+---
+title: "Notes on Chapter 4"
+author: "The Caveman Coder"
+date: "2025-12-30"
+output: html_document
+---
+
+# The **R-INLA** package
+ 
+ The integrated nested Laplace approximation (INLA) approach is implemented in R package **R-INLA**. This package is not on CRAN because it uses some external C libraries that make it difficult to build the binaries. 
+ 
+ Fitting a model using INLA requires two steps:  
+ 1. Writing the linear predictor of the model as a formula object.  
+ 2. Running the model by calling the `inla()` function.  
+ 
+ 
+## Linear predictor
+ 
+ The syntax of the linear predictor in **R-INLA** is similar to the syntax used to fit linear models with the `lm()` function.  
+ 
+ General form of the linear predictor formula in **R-INL**:  
+ ```r
+ y ~ 0 + b0 + x1 + x2 + f(i, model = "iid") 
+ ```
+ 
+### Main arguments of the `inla()` function
+ 
+ - `formula`: formula object that specifies the linear predictor.    
+ - `data`: data frame that contains the data we wish to model.  
+ - `family`: string or vector of strings that indicate thelikelihood family such as `gaussian`, `poisson`, or `binomial`.  
+ - `control.compute`: list with the specification of several computing variables. Example: `dic` specifies whether the DIC of the model should be computed.  
+ - `control.predictor`: list with the specification of several predictor variables such as `link` or `compute`. The former specifies the link function of the model, and the latter indicates whether the marginal densities for the linear predictor should be computed.  
+ 
+
+## Priors specification  
+ 
+ Lorem ipsum...
+ 
+
+## Example
+
+The example that follows demonstrates how to specify, fit a model, and inspedt the results using a real dataset and the **R-INLA** package. 
+
+
+### Data
+
+The data `Surg` contains the number of operations and the number of deaths in 12 hospitals performing cardiac surgery on babies. The column `hospital` denotes the hospital name, masked to preserve data privacy. The column `n` denotes the number of operations carried out in each hospital in a one-year period, and the column `r` denotes the number of deaths within 30 days after surgery.  
+
+```{r}
+library(INLA)
+
+head(Surg)
+```
+
+
+### Model
+
+We specify that $Y_i$ follows a Binomial likelihood for the number of deaths in each hospital. ($Y_i \sim Binomial(n_i, p_i), i = 1, ..., 12$)  
+
+We also assume that the mortality rates across hospitals are similar in some way, and specify a random effects model for the true mortality rates $p_i$ ($logit(p_i) = \alpha + u_i, u_i \sim N(0, \sigma^2)$). 
+
+The default prior for the precision of the random effects $u_i$ is $1/\sigma^2 \sim \Gamma(1, 5 \times 10^{-5})$. This can be changed, for example, by setting a penalized complexity (PC) prior on the standard deviation $\sigma$:
+```{r}
+prior.prec <- list(prec = list(prior = "pc.prec",
+                               param = c(1, 0.01)))
+```
+
+Translating the model into R code:
+```{r}
+formula <- r ~ f(hospital, model = "iid", hyper = prior.prec)
+```
+
+Calling the `inla()` function:
+```{r}
+res <- inla(
+  formula,
+  data = Surg,
+  family = "binomial",
+  Ntrials = n,
+  control.predictor = list(compute = TRUE),
+  control.compute = list(dic = TRUE, return.marginals.predictor = TRUE)
+)
+```
+
+### Results
+
+Returning the summary of results using `summary()`:
+```{r}
+summary(res)
+```
+
+Plotting the results:
+```{r}
+plot(res)
+plot(res, plot.prior = TRUE)
+```
+
+Viewing the value for DIC:
+```{r}
+res$dic$dic
+```
+
+Returning the summaries of the fixed effects:
+```{r}
+res$summary.fixed
+```
+
+Returning the summaries of the ranodm effects:
+```{r}
+res$summary.random
+```
+
+Returning the summaries of the hyperparameters:
+```{r}
+res$summary.hyperpar
+```
+
+
+Returning the predictions (the precicted mortalityh rates, in this case):
+```{r}
+res$summary.fitted.values
+```
+
+Plotting the posterior marginals for fixed effects:
+```{r}
+library(ggplot2)
+
+alpha <- res$marginals.fixed[[1]]
+
+ggplot(data.frame(inla.smarginal(alpha)), aes(x, y)) +
+  geom_line() + 
+  theme_bw() +
+  labs(caption = "Posterior distribution of parameter alpha.")
+```
+
+Showing the quantile 0.05 of $\alpha$:
+```{r}
+quant <- inla.qmarginal(0.05, alpha)
+quant
+
+inla.pmarginal(quant, alpha)
+```
+
+Plotting the probability of $\alpha$ being lower than the 0.05 quantile:
+```{r}
+ggplot(data.frame(inla.smarginal(alpha)), aes(x, y)) +
+  geom_line() +
+  geom_area(data = subset(data.frame(inla.smarginal(alpha)), x < quant), fill = "black") +
+  theme_bw() +
+  labs(caption = "Probability of parameter alpha being lower than the 0.05 quantile.")
+```
+
+Computing the prob density at particular values (say -2.5):
+```{r}
+inla.dmarginal(-2.5, alpha)
+```
+
+Plotting:
+```{r}
+ggplot(data.frame(inla.smarginal(alpha)), aes(x, y)) +
+  geom_line() +
+  geom_vline(xintercept = -2.5, linetype = "dashed") +
+  theme_bw() +
+  labs(caption = "Posterior distribution of paramter alpha at value -2.5.")
+```
+
+Computing a transformation of the marginal using `inla.tmarginal()` (to obtain the variance of the random effect $u_i$ by getting the marginal for the precision $\tau$ and then applying the inverse function):
+```{r}
+marg.variance <- inla.tmarginal(function(x) 1/x, res$marginals.hyperpar$"Precision for hospital")
+
+head(marg.variance)
+```
+
+Plotting the posterior of the variance of the random effect, $u_i$:
+```{r}
+ggplot(data.frame(inla.smarginal(marg.variance)), aes(x, y)) +
+  geom_line() +
+  theme_bw() + 
+  labs(caption = "Posterior distribution of the variance of the random effect mu sub i.")
+```
+
+
+Getting the mean posterior of the variance using `inla.emarginal()`:
+```{r}
+m <- inla.emarginal(function(x) x, marg.variance)
+m
+```
+
+Calculating the standard deviation using the expression $Var[X] = E[X^2] - E[X]^2$:
+```{r}
+mm <- inla.emarginal(function(x) x^2, marg.variance)
+
+sqrt(mm - m^2)
+```
+
+
+Calculating the quantiles of the marginal variance using the `inla.qmarginal()` function:
+```{r}
+inla.qmarginal(c(0.025, 0.5, 0.975), marg.variance)
+```
+
+Obtaining the summary statistics of the marginal, using `inla.zmarginal()`:
+```{r}
+inla.zmarginal(marg.variance)
+```
+
+Assessing the performance of the hospitals by examining the mortality rates can be done as follows: construct a data frame called `marginals` from the list `res$marginals.fitted.values`, add the `hospital` column to that, and plot the results:
+```{r}
+list_marginals <- res$marginals.fitted.values
+
+marginals <- data.frame(do.call(rbind, list_marginals))
+marginals$hospital <- rep(names(list_marginals), times = sapply(list_marginals, nrow))
+
+head(marginals)
+```
+
+Plotting `marginals` using `facet_wrap()`:
+```{r}
+marginals |> ggplot(
+  aes(x = x, y = y)
+) +
+  geom_line() +
+  facet_wrap(~ hospital) +
+  labs(x = "", y = "Density") +
+  geom_vline(xintercept = 0.1, col = "gray") +
+  theme_bw() +
+  labs(caption = "Posterior distributions of mortality rates of each hospital.")
+```
+
+Computing the probabilities that the mortality rates are greater than a given threshold, say 0.1:
+```{r}
+marg <- res$marginals.fitted.values[[1]]
+1 - inla.pmarginal(q = 0.1, marginal = marg)
+```
+
+Applying the above computation for all hospitals by using the `sapply()` function:
+```{r}
+sapply(res$marginals.fitted.values, FUN = function(marg){1 - inla.pmarginal(q = 0.1, marginal = marg)})
+```
+
+The result shows that the probability that the mortality rate exceeds 0.1 is highest for hospital 8 (with a probability of 0.83) and lowest for hospital 4 (with a probability of $4.36 \times 10^{-6}$).
+
+
+
+
+
+
+
+
+

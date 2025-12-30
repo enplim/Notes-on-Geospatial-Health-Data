@@ -4,8 +4,8 @@ Notes and R code resulting from coding along with Paula Moraga through her book 
 ## Chapters
 - [x] `1. Geospatial Health`
 - [x] `2. Spatial Data and R Packages for Mapping`
-- [ ] `3. Bayesian Inference and INLA`
-- [ ] `4. The R-INLA Package`
+- [x] `3. Bayesian Inference and INLA`
+- [x] `4. The R-INLA Package`
 - [ ] `5. Areal Data`
 - [ ] `6. Spatial Modeling of Areal Data`
 - [ ] `7. Spatio-Temporal Modeling of Areal Data`
