@@ -1,0 +1,358 @@
+---
+title: "Notes on Chapter 5"
+author: "The Caveman Coder"
+date: "2025-12-30"
+output: html_document
+---
+
+# Areal Data
+
+Areal or lattice data arise when a fixed domain is partitoned into a finite number of subregions at which outcomes are aggregated.  
+
+Examples:
+- The number of cancer cases in countries  
+- The number of road accidents in provinces  
+- The proportion of people living in poverty in census tracts  
+
+
+## Spatial neighborhood matrices
+
+Example showing how neighbhors of several counties in the map of Pennsylvania, USA are coumputed using a neighborhood definition based on common boundaries of the counties. 
+
+Showing first the map of Pennsylvania obtained from the **SpatialEpi** package:
+```{r fig.cap="Map of Pennsylvania counties."}
+library(SpatialEpi)
+
+map <- pennLC$spatial.polygon
+plot(map)
+```
+
+Check what type of object `map` is:
+```{r}
+class(map)
+```
+
+
+Obtaining the neighbors of each county in the map using the `poly2nb()` function from the **spdep** package:
+```{r}
+library(spdep)
+
+nb <- poly2nb(map)
+head(nb)
+```
+
+The `poly2nb` function returns a neighbors list based on counties with contiguous boundaries. Each element in `nb` represents one county and contains the indices of its neighbors.  
+
+Showing the neighbors of specific counties of Pennsylvania, say neighbors of counties 2, 44, and 58:
+```{r}
+d <- data.frame(county = names(map), neigh = rep(0, length(map)))
+
+head(d)
+rownames(d) <- names(map)
+```
+
+Continuing... Creating a `SpatialPoligonsDataFrame` object from the original `map` and `d`:
+```{r}
+map <- SpatialPolygonsDataFrame(map, d, match.ID = TRUE)
+```
+
+Continuing... Setting `neigh` equal to 1 for counties that are neighbors of counties 2, 44, and 58 (otherwise, 0):
+```{r}
+map$neigh[nb[[2]]] <- 1
+map$neigh[nb[[44]]] <- 1
+map$neigh[nb[[58]]] <- 1
+```
+
+Adding coordinates to our data, plus a variable called `ID` that contains the `id` of the counties:
+```{r}
+coord <- coordinates(map)
+map$long <- coord[, 1]
+map$lat <- coord[, 2]
+map$ID <- 1:dim(map@data)[1]
+```
+
+Plotting the map with `ggplot()`. First, convert `map` (which is a `SpatialPolygonsDataFrame` object) to a simple feature object of class `sf` using `st_as_sf()` function from the **sf** package:
+```{r fig.cap="Neighbors of areas 2, 44, and 58 of Pennsylvania."}
+library(sf)
+library(ggplot2)
+
+mapsf <- st_as_sf(map)
+
+ggplot(mapsf) +
+  geom_sf(aes(fill = as.factor(neigh))) +
+  geom_text(aes(x = long, y = lat, label = ID), color = "white") +
+  theme_bw() +
+  guides(fill = "none")
+```
+
+
+## Standardized incidence ratio
+
+This is the ratio of observed counts to the expected counts:
+$$
+SIR_i = Y_i / E_i
+$$
+The expected counts $E_i$ represent the total number of cases that one would expect if the population if area *i* behaved in a way the standard (or regional) population behaves.  
+
+$E_i$ can be calculated using:
+$$
+E_i = \sum_{j=1}^{m} r_j^{(s)} n_j^{(i)}
+$$
+where $r_j^{(s)}$ is the rate or number of cases divided by the population in $j$ in the standard population, and $n_j^{(i)}$ is the population stratum $j$ of area $i$.
+
+The number of lung cancer cases and the population of Pennsylvania at country level stratified on race (white or non-white), gender (female or male), and age (under 40, 40-59, 60-69, and 70+) can be found in `pennLC$data`. 
+```{r}
+head(pennLC$data)
+```
+
+Continuing... 
+```{r}
+library(dplyr)
+
+d <- pennLC$data |> 
+  group_by(county) |> 
+  summarize(Y = sum(cases))
+
+head(d)
+```
+
+Calculating the expected number of cases in each county using indirect standardization using the `expected()` function of **SpatialEpi**:
+```{r}
+# First sort the data
+pennLC$data <- pennLC$data[order(
+  pennLC$data$county,
+  pennLC$data$race,
+  pennLC$data$gender,
+  pennLC$data$age
+), ]
+
+# Using the `expected()` function
+E <- expected(
+  population = pennLC$data$population,
+  cases = pennLC$data$cases,
+  n.strata = 16
+)
+
+head(E)
+```
+
+Adding vector `E` to our data frame `d` where the `E` elements correspond to the counties in `d$country` in the same order:
+```{r}
+d$E <- E[match(d$county, unique(pennLC$data$county))]
+head(d)
+```
+
+Note the the function `match()` was used to calculate the vector of the positions that match `d$county` in `unique(pennLC$data$county)`, which are the corresponding counties of `E`.
+
+Computing the SIR values (ratio of the observed to the expected counts) using the formula explained above:
+```{r}
+d$SIR <- d$Y / d$E
+head(d)
+```
+
+Adding the SIR info back to our `map` object:
+```{r}
+map <- merge(map, d)
+```
+
+Converting the `map` object (a `SpatialPolygonDataFrame` object) to an `sf` object, in preparation for plotting:
+```{r}
+mapsf <- st_as_sf(map)
+```
+
+Plotting the map using `ggplot()` (now with SIR info used to color the counties):
+```{r fig.cap="SIR of lung cancer in Pennsylvania counties."}
+mapsf |> ggplot() +
+  geom_sf(aes(fill = SIR)) +
+  scale_fill_gradient2(
+    midpoint = 1, 
+    low = "blue",
+    mid = "white",
+    high = "red"
+  ) +
+  theme_bw()
+```
+
+The white color fill represents counties where the number of lung cancer cases observed match the number of expected cases. In counties where SIR > 1 or the number of lung cancer cases observed is higher than the number of expected cases, the fill color is reddish. In counties where SIR < 1 or the number of observed lung cancer cases is lower than that of expected cases, the fill color is bluish.  
+
+
+## Spatial small area disease risk estimation
+
+In regions with small populations or rare diseases are expected, the expected counts may be very low, and this leads to misleading SIRs. 
+
+A popular spatial model that we can use for this case is the BYM model (Besag-York-Mollie). In this model, the spatial random effect is assigned a Conditional Autoregressive distribution which wmoothes the data according to certain neighborhood structure that specifies that two areas are neighbors if they share a common boundary.  
+
+In **R-INLA** the BYM model can be accessed by specifying the formula in this manner:
+```r
+formula <- Y ~ 
+  f(idareeau, model = "besag", graph = g, scale.model = TRUE) +
+  f(idareav, model = "iid")
+```
+
+In this formula, the option `scale.model = TRUE` is used to make the precision parameter of models with different CAR priors comparable.  
+
+A new parametrization of the BYM model called BYM2 was proposed by Simpson et al. in 2017. In **R-INLA**, the BMY2 model can be specified by creating the formula like this:
+```r
+formula <- Y ~ f(idarea, model = "bym2", graph = g)
+```
+
+### Spatial modeling of lung cancer in Pennsylvania
+
+Using the BYM2 model to calculate relative risks of lung cancer in the Pennsylvania counties:
+
+First we define the `idarea` variable (typically a vector `c(1, 2, ..., I)` where `I` is the number of counties).
+```{r}
+map$idarea <- 1:nrow(map@data)
+```
+
+Then we define a PC prior for the marginal precision...
+```{r}
+prior <- list(
+  prec = list(
+    prior = "pc.prec",
+    param = c(0.5 / 0.31, 0.01)
+  ),
+  phi = list(
+    prior = "pc",
+    param = c(0.5, 2 / 3)
+  )
+)
+```
+
+Computing the object `g` with the neighborhood matrix that will be used in the spatially structured effect (create first a neighbors list `nb` using `poly2nb()` then use `nb2INLA()` to convert it to a neighborhood representation matrix required by the **R-INLA** package):
+```{r}
+# creation of neighbors list nb
+nb <- poly2nb(map)
+head(nb)
+
+# creation of neighborhood representation matrix
+library(INLA)
+
+nb2INLA("map.adj", nb)
+g <- inla.read.graph(filename = "map.adj")
+```
+
+Specifying the formula:
+```{r}
+formula <- Y ~ f(idarea, model = "bym2", graph = g, hyper = prior)
+```
+
+Fitting the model by calling the `inla()` function:
+```{r}
+res <- inla(
+  formula, 
+  family = "poisson",
+  data = map@data,
+  E = E,
+  control.predictor = list(compute = TRUE)
+)
+```
+
+The parameter `control.predictor = TRUE` means that we set the `control.predictor` parameter equal to `list(compute = TRUE`) to compute the posteriors of the predictions.
+
+Checking the results:
+```{r}
+summary(res)
+```
+
+Looking at the summaries of relative risks:
+```{r}
+head(res$summary.fitted.values)
+```
+
+Adding columns to the results in preparation for plotting:
+```{r}
+map$RR <- res$summary.fitted.values[, "mean"]
+map$LL <- res$summary.fitted.values[, "0.025quant"]
+map$UL <- res$summary.fitted.values[, "0.975quant"]
+
+summary(map@data[, c("RR", "LL", "UL")])
+```
+
+Code for generating plot objects:
+```{r}
+mapsf <- st_as_sf(map)
+
+gRR <- mapsf |> 
+  ggplot() +
+  geom_sf(aes(fill = RR)) +
+  scale_fill_gradient2(
+    midpoint = 1,
+    low = "blue", 
+    mid = "white",
+    high = "red",
+    limits = c(0.7, 1.5)
+  ) +
+  theme_bw()
+
+gRR
+```
+
+for gLL:
+```{r}
+gLL <- mapsf |> 
+  ggplot() +
+  geom_sf(aes(fill = LL)) +
+  scale_fill_gradient2(
+    midpoint = 1,
+    low = "blue", 
+    mid = "white",
+    high = "red",
+    limits = c(0.7, 1.5)
+  ) + 
+  theme_bw()
+
+gLL
+```
+
+for gUL:
+```{r}
+gUL <- mapsf |> 
+  ggplot() +
+  geom_sf(aes(fill = UL)) +
+  scale_fill_gradient2(
+    midpoint = 1,
+    low = "blue", 
+    mid = "white",
+    high = "red",
+    limits = c(0.7, 1.5)
+  ) + 
+  theme_bw()
+
+gUL
+```
+
+Plotting the three objects side-by-side using the `plot_grid()` function from the **cowplot** package:
+```{r}
+library(cowplot)
+plot_grid(gRR, gLL, gUL, ncol = 1)
+```
+ 
+Of course, we could have used `facet_grid()` or `facet_wrap()` to achieve the same effect. 
+
+
+Looking at the summary of random effects in the results:
+```{r}
+head(res$summary.random$idarea)
+```
+
+Adding another column to the results to make plotting easier:
+```{r}
+mapsf$re <- res$summary.random$idarea[1:67, "mean"]
+head(mapsf)
+```
+
+Visualizing the posterior mean of the random effects:
+```{r fig.cap="Posterior mean of the BYM2 random effect."}
+mapsf |> ggplot() +
+  geom_sf(aes(fill = re)) +
+  scale_fill_gradient2(
+    midpoint = 0,
+    low = "blue",
+    mid = "white",
+    high = "red"
+  ) +
+   theme_bw()
+```
+
+
