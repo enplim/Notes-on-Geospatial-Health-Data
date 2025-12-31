@@ -7,7 +7,7 @@ Notes and R code resulting from coding along with Paula Moraga through her book 
 - [x] `3. Bayesian Inference and INLA`
 - [x] `4. The R-INLA Package`
 - [x] `5. Areal Data`
-- [ ] `6. Spatial Modeling of Areal Data`
+- [x] `6. Spatial Modeling of Areal Data`
 - [ ] `7. Spatio-Temporal Modeling of Areal Data`
 - [ ] `8. Geostatistical Data` 
 - [ ] `9. Spatial Modeling of Geostatistical Data` 
