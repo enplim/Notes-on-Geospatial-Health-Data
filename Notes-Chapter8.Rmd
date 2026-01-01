@@ -1,0 +1,382 @@
+---
+title: "Notes on Chapter  8"
+author: "The Caveman Coder"
+date: "2026-01-01"
+output: html_document
+---
+
+# Geostatistical Data
+
+Geostatistical data are measurements about a spatially continuous phenomenon that have been collected at particular sites. 
+Examples: 
+- the disease risk measured using surveys at specific villages  
+- the level of pollutant recorded at different monitoring stations  
+- the density of mosquitoes responsible for disease transmission dmeasured using traps at different locations  
+
+
+## Gaussian random fields
+
+Gaussian random fields are collections of random variables where the observations occur in a continous domain, and where every finite collection of random variables has a multivariate normal distribution...
+
+
+## Stochastic partial differential equation approach
+
+When geostatistical data are consicered, it can often be assumed that there is a spatially continuous variable underlying the observations that can be modeled using a Gaussian random field.  The stochastic partial differential equation approach (SPDE) implemented in the **R_INLA** package can be used to fit a spatial model and predict the variable of interest at unsampled locations.  
+
+
+## Spatial modeling of rainfall in Parana, Brazil 
+
+Aim: show how to predict rainfall in the state of Parana, Brazil, using data from the **geoR** package.  
+```{r}
+library(geoR)
+library(ggplot2)
+
+df <- data.frame(cbind(parana$coords, Rainfall = parana$data))
+head(df)
+```
+
+Plotting:
+```{r fig.cap="Average rainfall measured at 143 recording stations in Parana state, Brazil."}
+df |> ggplot() +
+  geom_point(aes(east, north, color = Rainfall), size = 2) +
+  coord_fixed(ratio = 1) +
+  scale_color_gradient(low = "blue", high = "orange") + 
+  geom_path(
+    data = data.frame(parana$border),
+    aes(east, north)
+  ) +
+  theme_bw()
+```
+
+
+### Model
+
+Rainfall values are available at the locations of the recording station. However, rainfall occurs continuously in space and we can use a geostatistical model to predict rainfall values in other locations of Parana. 
+
+It is safe to assume that the rainfall at a particular location follows a Gaussion distribution with a specific mean and variance, and the mean can be expressed as the sum of an intercept and a spatially structured random effect that follows a zero-mean Gaussian process with Matem covariance function. Mathematically, 
+$$
+Y_i \sim N(\mu_i, \sigma^2), \space i = 1, 2, ..., n, \\
+\mu_i = \beta_0 + Z(s_i)
+$$
+
+### Mesh construction
+
+The SPDE approach approximates the continuous Gaussian field $Z(\cdot)$ as a discrete Gaussian Markov random field by means of a finite basis function defined on a triangulated mesh of the region of study. In the **R-INLA** package, this triangulated mesh can be constructed using the `inla.mesh.2d()` fuction. 
+
+Calling the `inla.mesh.2d()` function the location coordinates in the Parana data: 
+```{r}
+library(INLA)
+
+# viewing the location coordinates first
+coo <- parana$coords
+summary(dist(coo))
+```
+
+Actual call to `inla.mesh.2d()`:
+```{r fig.cap="Triangulated mesh to build the SPDE model."}
+mesh <- inla.mesh.2d(
+  loc = coo,
+  offset = c(50, 100),
+  cutoff = 1,
+  max.edge = c(30, 60)
+)
+
+plot(mesh)
+points(coo, col = "red")
+```
+
+The offset values were chosen to have an inner size of 50, and an outer extension of size 100 around the locations. The cutoff was chosen to avoid many small triangles that have very close points. The `max.edge` values tell the model to use small triangles within the region, and larger triangles in the extension.  
+
+Calculating the number of vertices in the triangulated mesh:
+```{r}
+mesh$n
+```
+
+
+Constructing a triangulated mesh using a boundary of the region of study:
+```{r fig.cap="Non-convex triangulated mesh to build the SPDE model."}
+bnd <- inla.nonconvex.hull(coo)
+meshb <- inla.mesh.2d(
+  boundary = bnd,
+  offset = c(50, 100),
+  cutoff = 1,
+  max.edge = c(30, 60)
+) 
+
+plot(meshb)
+points(coo, col = "red")
+```
+
+
+### Building the SPDE model on the mesh
+
+Using `inla.spde2.matrn()` function to build the SPDE model on the triangulated mesh:
+```{r}
+spde <- inla.spde2.matern(mesh = mesh, alpha = 2, constr = TRUE)
+```
+
+
+### Index set
+
+Generating the index set for the SPDE model using the function `inla.spde.make.index()`:
+```{r}
+indexs <- inla.spde.make.index("s", spde$n.spde)
+```
+
+
+### Projection matrix
+
+Construction of a projection matrix is necessary to project the Gaussian random field from the observations to the triangulation vertices. In **R-INLA** the function `inla.spde.make.A()` is used to create a projection matrix.
+
+Constructing the projection matrix:
+```{r}
+A <- inla.spde.make.A(mesh = mesh, loc = coo)
+```
+
+Checking the dimension of the projection matrix:
+```{r}
+dim(A)
+```
+
+Checking the number of observations:
+```{r}
+nrow(coo)
+```
+
+Verifying that the row elements of the projection matrix sum to 1:
+```{r}
+rowSums(A)
+```
+
+
+### Prediction data
+
+Constructing another matrix that will hold the locations where the rainfall values are going to be predicted:
+```{r}
+bb <- sp::bbox(parana$border)
+x <- seq(bb[1, "min"] - 1, bb[1, "max"] + 1, length.out = 50)
+y <- seq(bb[2, "min"] - 1, bb[2, "max"] + 1, length.out = 50)
+
+coop <- as.matrix(expand.grid(x, y))
+```
+
+The snippet above is used to create a grid called `coop` with $50 \times 50$ locations by using `expand.grid()` and combining vectors `x` and `y` which contain coordinates in the range of `parana$border`. 
+
+Keeping only the points in `coop` that lie within `parana$border` using the function `point.in.polygon()` from the **sp** package:
+```{r fig.cap="Prediction locations in Parana state, Brazil."}
+ind <- sp::point.in.polygon(
+  coop[, 1], coop[, 2],
+  parana$border[, 1], parana$border[, 2]
+)
+
+coop <- coop[which(ind == 1), ]
+plot(coop, asp = 1)
+```
+
+Making another projection matrix for the prediction locations:
+```{r}
+Ap <- inla.spde.make.A(mesh = mesh, loc = coop)
+dim(Ap)
+```
+
+### Stack with data for estimation and prediction
+
+Using the function `inla.stack()` to organize the data, effects, and projection matrices:
+```{r}
+# stack for estimation
+stk.e <- inla.stack(
+  tag = "est",
+  data = list(y = parana$data),
+  A = list(1, A),
+  effects = list(data.frame(
+    rep(1, nrow(coo))
+  ), s = indexs)
+)
+
+# stack for prediction
+stk.p <- inla.stack(
+  tag = "pred",
+  data = list(y = NA),
+  A = list(1, Ap),
+  effects = list(data.frame(
+    b0 = rep(1, nrow(coop))
+  ), s = indexs)
+) 
+
+# the full stack
+stk.full <- inla.stack(stk.e, stk.p)
+```
+
+### Model formula
+
+The formula is specified by including the response variable in the left-hand side, and the fixed and random effects in the right-hand side:
+```{r}
+formula <- y ~ 0 + b0 + f(s, model = spde)
+```
+
+### The `inla()` call
+
+Fitting the model by calling `inla()` using default priors:
+```{r}
+res <- inla(
+  formula, 
+  data = inla.stack.data(stk.full),
+  control.predictor = list(
+    compute = TRUE,
+    A = inla.stack.A(stk.full)
+  )
+)
+```
+
+The `control.predictor` is set to `compute = TRUE` to allow the model to include the posteriors of the predictors.  
+
+
+### Results
+
+Collected the indices of the rows corresponding to the predictions:
+```{r}
+index <- inla.stack.index(stk.full, tag = "pred")$data
+```
+
+Collecting the posterior means and the upper and lower limits of 95% credible intervals:
+```{r}
+pred_mean <- res$summary.fitted.values[index, "mean"]
+pred_ll <- res$summary.fitted.values[index, "0.025quant"]
+pred_ul <- res$summary.fitted.values[index, "0.975quant"]
+```
+
+
+Creating maps of the predicted rainfall values:
+```{r}
+dpm <- rbind(
+  data.frame(
+    east = coop[, 1], north = coop[, 2],
+    value = pred_mean,
+    variable = "pred_mean"
+  ),
+  data.frame(
+    east = coop[, 1], north = coop[, 2],
+    value = pred_ll, variable = "pred_ll"
+  ),
+  data.frame(
+    east = coop[, 1], north = coop[, 2],
+    value = pred_ul,
+    variable = "pred_ul"
+  )
+)
+
+dpm$variable <- as.factor(dpm$variable)
+head(dpm)
+```
+
+Creating the plot with `ggplot`:
+```{r fig.cap="Rainfall predictions and lower and upper limits of 95% CI in Parana state, Brazil."}
+dpm |> ggplot() +
+  geom_tile(aes(east, north, fill = value)) +
+  facet_wrap(~ variable, nrow = 1) +
+  coord_fixed(ratio = 1) +
+  scale_fill_gradient(
+    name = "Rainfall",
+    low = "blue",
+    high = "orange"
+  ) +
+  theme_bw()
+```
+
+
+### Projecting the spatial field
+
+Computing the posterior mean of the spatial field at new locations:
+```{r}
+new_loc <- cbind(c(219, 678, 818), c(20, 20, 160))
+Aproj <- inla.spde.make.A(mesh, loc = new_loc)
+Aproj %*% res$summary.random$s$mean
+```
+
+Projecting the spatial field values at different locations using the `inla.mesh.projector()` and `inla.mesh.project()` functions:
+```{r}
+rang <- apply(mesh$loc[, c(1, 2)], 2, range)
+
+# compute the projection matrix for the new locations
+proj <- inla.mesh.projector(
+  mesh,
+  xlim = rang[, 1],
+  ylim = rang[, 2],
+  dims = c(300, 300)
+)
+```
+
+Using the `inla.mesh.project()` function to project the posterior mean and posterior standard deviation of the spatial field calculated at the mesh nodes to the grid locations:
+```{r}
+mean_s <- inla.mesh.project(proj, res$summary.random$s$mean)
+sd_s <- inla.mesh.project(proj, res$summary.random$s$sd)
+```
+
+
+Preparing the projected values for plotting:
+```{r}
+df2 <- expand.grid(x = proj$x, y = proj$y)
+df2$mean_s <- as.vector(mean_s)
+df2$sd_s <- as.vector(sd_s)
+```
+
+
+Plotting using the **cowplot** package to create side-by-side plots:
+```{r fig.cap="Posterior mean and posterior standard deviation of the spatial field projected on a grid."}
+library(viridis)
+library(cowplot)
+
+gmean <- ggplot(
+  df2,
+  aes(x = x, y = y, fill = mean_s)
+) +
+  geom_raster() +
+  scale_fill_viridis(na.value = "transparent") +
+  coord_fixed(ratio = 1) +
+  theme_bw()
+
+gsd <- ggplot(
+  df2,
+  aes(x = x, y = y, fill = sd_s)
+) +
+  geom_raster() +
+  scale_fill_viridis(na.value = "transparent") +
+  coord_fixed(ratio = 1) +
+  theme_bw()
+
+plot_grid(gmean, gsd)
+```
+
+
+## Disease mapping with geostatistical data
+
+In low- and middle- income countries, disease prevalence surveys are usually conducted to quantify the risk of diseases such as malaria and tuberculosis, and to inform prevention and control interventions. Prevalence surveys provide disease information only at specific location; however, disease risk is a spatially continuous phenomenon and local predictions are needed to be able to direct resources where they are most needed. Model-based geostatistics can be used in this situation (or with this type of data) to make predictions at unsampled locations and construct a spatially continuous surface of disease risk. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
