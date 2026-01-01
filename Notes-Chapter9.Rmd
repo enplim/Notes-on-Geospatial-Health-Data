@@ -1,0 +1,508 @@
+---
+title: "Notes on Chapter 9"
+author: "The Caveman Coder"
+date: "2026-01-01"
+output: html_document
+---
+
+# Spatial modeling of geostatistical data: Malaria in the Gambia
+
+Aim: show how to fit a geostatistical model to predict malaria prevalence in the Gambia using stochastic partial differential equation (SPDE) and plot the results by means of interactive maps created using **leaflet**.  
+
+## Data
+
+Loading the `gambia` dataset from the **geoR** package:
+```{r}
+library(geoR)
+data(gambia)
+```
+
+Data dictionary:
+- `x`: the x-coordinate of the village (UTM).  
+- `y`: the y-coordinate of the village (UTM).  
+- `pos`: presence (1) or absence (0) of malaria in a blood sample taken from a child.  
+- `age`: age of the child, in days.  
+- `netuse`: indicator variable denoting whether the child regularly sleeps under a bed net.  
+- `treated`: indicator variable denoting whether the bed net is treated or not.  
+- `green`: satellite-derived measure of the greenness of vegetation in the vicinity of the village.  
+- `phc`: indicator variable denoting the presence or absence of a health center in the village.  
+
+```{r}
+head(gambia)
+```
+
+## Data preparation
+
+Data in `gambia` are given at an individual level. For the analysis, this data need to be aggregated by village. 
+
+### Prevalence
+
+Inspecting the data:
+```{r}
+dim(gambia)
+dim(unique(gambia[, c("x", "y")]))
+```
+
+Calculating the prevalence of malaria cases:
+```{r}
+library(dplyr)
+
+d <- gambia |> group_by(x, y) |> 
+  summarize(
+    total = n(),
+    positive = sum(pos),
+    prev = positive / total
+  )
+
+head(d)
+```
+
+
+### Transforming coordinates
+
+`leaflet()` expects data to be specified in geographic coordinates (long/lat). The coordinates in the `gambia` dataset are in UTM format (easting/northing). 
+
+Transforming the UTM coordinates using `st_transform()` from the **sf** package:
+```{r}
+library(sf)
+
+sf <- st_as_sf(
+  as.data.frame(d), 
+  coords = c("x", "y"),
+  crs = "+proj=utm +zone=28"
+)
+
+sft <- st_transform(sf, crs = 4326)
+```
+
+Adding the longitude and latitude variables to dataframe `d`:
+```{r}
+d[, c("long", "lat")] <- st_coordinates(sft)
+head(d)
+```
+
+
+### Mapping prevalence
+
+Creating an interactive map in **leaflet** with circles whose color correspond to the prevalence rates of malaria:
+```{r fig.cap="Malaria prevalence in The Gambia."}
+library(leaflet)
+library(viridis)
+
+pal <- colorBin("viridis", bins = c(0, 0.25, 0.5, 0.75, 1))
+
+leaflet(d) |> 
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  addCircles(
+    lng = ~ long,
+    lat = ~ lat,
+    color = ~ pal(prev)
+  ) |> 
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = ~ prev,
+    title = "Prev."
+  ) |> 
+  addScaleBar(position = c("bottomleft"))
+```
+
+
+### Environmental covariates
+
+Aim: to model malaria prevalence in the Gambia using a covariate that indicates the elevation.
+
+Obtaining the elevation information using the function `elevation_30s()` from the **geodata** package:
+```{r}
+library(geodata)
+
+r <- elevation_30s(country = "GMB", path = tempdir())
+```
+
+The function `elevation_30s()` obtains elevation for any country (specified using the ISO country code) at a resolution of 30 arc seconds (about 1 km).
+
+Adding elevation data to the leaflet plot using `addRasterImage()`:
+```{r}
+pal <- colorNumeric(
+  "viridis",
+  values(r),
+  na.color = "transparent"
+)
+
+leaflet() |> 
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  addRasterImage(
+    r,
+    colors = pal,
+    opacity = 0.5
+  ) |> 
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = values(r),
+    title = "Elevation"
+  ) |> 
+  addScaleBar(position = c("bottomleft"))
+```
+
+Adding the elevation values (by extracting them using `terra::extract()`) to dataframe `d` to be able to use it as a covariate in the model:
+```{r}
+d$cov <- terra::extract(r, d[, c("long", "lat")])$GMB_elv_msk
+```
+
+Viewing the final dataset:
+```{r}
+head(d)
+```
+
+
+## Modeling
+
+Aim: Create a model to predict malaria prevalence in The Gambia using the SPDE approach and the **R-INLA** package.
+
+### Model
+
+Conditional on the true prevalence $P(\mathbf{x}_i)$ at location $\mathbf{x}_i, i = 1, ..., n$, the number of positive results $Y_i$ out of $N_i$ people sampled follows a binomial distribution:
+$$
+Y_i|P(\mathbf{x}_i) \sim Binomial(N_i, P(\mathbf{x}_i)), \\
+logit(P(\mathbf{x}_i)) = \beta_0 + \beta_1 \times \text{elevation} + S(\mathbf{x}_i)
+$$
+
+where $\beta_0$ denotes the intercept, and $\beta_1$ denotes the coefficient of elevation,  and $S(\cdot)$ is a spatial random effect that follows a non-zero mean Gaussian process with Matem covariance function...  
+
+### Mesh construction
+
+Similar to what was done in chapter 8, it is necessasry to build a triangulated mesh that covers The Gambia over which to make the random field discretization (is it because the model follows a binomial distribution instead of normal?). 
+
+Building the triangulated mesh using the function `inla.mesh.2d()` from the **R-INLA** package:
+```{r}
+library(INLA)
+
+coo <- cbind(d$long, d$lat)
+# mesh <- inla.mesh.2d(
+mesh <- fmesher::fm_mesh_2d_inla(
+  loc = coo,
+  max.edge = c(0.1, 5),
+  cutoff = 0.01
+)
+```
+
+Note: `inla.mesh.2d()` was deprecated. The newer function is `fmesher::fm_mesh_2d_inla()`.
+
+Inspecting the number of mesh vertices:
+```{r}
+mesh$n
+```
+
+Plotting the mesh object:
+```{r fig.cap="Triangulated mesh used to build the SPDE model."}
+plot(mesh)
+points(coo, col = "red")
+```
+
+
+### Building the SPDE model on the mesh
+
+Using the `inla.spded2.matern()` function to build the SPDE model:
+```{r}
+spde <- inla.spde2.matern(
+  mesh = mesh,
+  alpha = 2,
+  constr = TRUE
+)
+```
+
+Here the argument `constr` was set to `TRUE` to impose an integrate-to-zero constraint. `alpha` is a parameter related to the smoothness parameter of the process $\alpha = v + d/2$. If we want the smoothness parameter $v$ to equal 1, the value of `alpha` becomes 2 (d = 2 in our spatial case).
+
+### Index set
+
+Generating the indes set for the SPDE model using `inla.spde.make.index()`:
+```{r}
+indexs <- inla.spde.make.index("s", spde$n.spde)
+lengths(indexs)
+```
+
+
+### Projection matrix
+ 
+Building the projection matrix $A$ that will be used to project the spatially continuous Gaussian random field from the observations to the mesh nodes. 
+
+Using `inla.spde.make.A()` function to create the projection matrix:
+```{r}
+A <- inla.spde.make.A(mesh = mesh, loc = coo)
+```
+
+### Prediction data
+
+Extracting the locations from the raster data (the locations are where the model will predict the prevalence from) using the `crds()` function from **terra**:
+```{r}
+dp <- terra::crds(r)
+dim(dp)
+```
+
+There are 12847 points -- these are location points that the model will predict from. 
+
+Lowering the resolution of the raster using the `aggregate()` function from **terra** (to make the computation faster):
+```{r}
+ra <- terra::aggregate(r, fact = 5, fun = mean)
+```
+
+Extracting prediction points from the aggregated `r` raster data:
+```{r}
+dp <- terra::crds(ra)
+dp <- as.data.frame(dp)
+dim(dp)
+```
+
+Now we have fewer prediction points. 
+
+Extracting the prediction points (location points) again, this time as variable `coop`:
+```{r}
+coop <- terra::crds(ra)
+```
+
+Adding to the prediction data `dp` a column with elevation values for the prediction coordinates:
+```{r}
+dp$cov <- terra::extract(ra, coop)[, 1]
+head(dp)
+```
+
+Creating another projection matrix for projevting the spatially continuous Gaussian random field from the prediction locations to the mesh nodes:
+```{r}
+Ap <- inla.spde.make.A(mesh = mesh, loc = coop)
+```
+
+### Stack with data for estimation and prediction
+
+Using the `inla.stack()` function to organize data, effects, and prediction matrices:
+```{r}
+# stack for estimation
+stk.e <- inla.stack(
+  tag = "est",
+  data = list(y = d$positive, numtrials = d$total),
+  A = list(1, A),
+  effects = list(data.frame(b0 = 1, elevation = d$cov), s = indexs)
+) 
+
+# stack for prediction
+stk.p <- inla.stack(
+  tag = "pred",
+  data = list(y = NA, numtrials = NA),
+  A = list(1, Ap),
+  effects = list(data.frame(b0 = 1, elevation = dp$cov), s = indexs)
+)
+
+# the full stack
+stk.full <- inla.stack(stk.e, stk.p)
+```
+
+### Model formula
+
+Specifying the model formula by including in the left-hand side the response variable and in the right-hand side the fixed and random effects:
+```{r}
+formula <- y ~ 0 + b0 + elevation + f(s, model = spde)
+```
+
+### `inla()` call
+
+Fitting the model by calling `inla()` and using the default priors in **R-INLA**:
+```{r}
+res <- inla(
+  formula,
+  family = "binomial",
+  Ntrials = numtrials,
+  control.family = list(link = "logit"),
+  data = inla.stack.data(stk.full),
+  control.predictor = list(
+    compute = TRUE,
+    link = 1,
+    A = inla.stack.A(stk.full)
+  ),
+  control.compute = list(return.marginals.predictor = TRUE)
+)
+```
+
+The argument `control.predictor` set to `compute = TRUE` will allow the model to compute the posteriors of the predictors. `link` when set to `1` will allow the model to compute the fitted values (the `res$summary.fitted.values`` and `res$marginals.fitted.values`) with the same link function as the `family` specified.  
+
+
+## Mapping malaria prevalence
+
+Obtaining the indices that correspond to the prediction locations:
+```{r}
+index <- inla.stack.index(stack = stk.full, tag = "pred")$data
+```
+
+Extracting the vectors with the mean prevalence and the upper and lower limits of 95% credible intervals:
+```{r}
+prev_mean <- res$summary.fitted.values[index, "mean"]
+prev_ll <- res$summary.fitted.values[index, "0.025quant"]
+prev_ul <- res$summary.fitted.values[index, "0.975quant"]
+```
+
+
+Creating a map with the predicted prevalence at the prediction locations given in `coop`:
+```{r fig.cap="Map of malaria prevalence predictions in The Gambia creatd with `leaflet()` and `addCircles()`."}
+pal <- colorNumeric(
+  palette = "viridis",
+  domain = c(0, 1),
+  na.color = "transparent"
+)
+
+leaflet() |> 
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  addCircles(
+    lng = coop[, 1], 
+    lat = coop[, 2],
+    color = pal(prev_mean)
+  )  |> 
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = prev_mean,
+    title = "Prev."
+  ) |> 
+  addScaleBar(position = c("bottomleft"))
+```
+
+Plotting the prevalence prediction as a raster:
+```{r fig.cap="Map of malaria prevalence predictions in The Gambia created with `leaflet()` and `addRasterImage()`."}
+# create a SpatVector object
+sv <- terra::vect(
+  coop,
+  atts = data.frame(
+    prev_mean = prev_mean,
+    prev_ll = prev_ll,
+    prev_ul = prev_ul
+  ),
+  crs = "+proj=longlat +datum=WGS84"
+)
+
+# rasterize
+r_prev_mean <- terra::rasterize(
+  x = sv, y = ra,
+  field = "prev_mean",
+  fun = mean
+)
+
+# plotting the raster with the prevalence values in a map
+pal <- colorNumeric("viridis", c(0, 1), na.color = "transparent")
+
+leaflet() |> 
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  addRasterImage(
+    r_prev_mean,
+    colors = pal,
+    opacity = 0.5
+  ) |> 
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = values(r_prev_mean),
+    title = "Prev."
+  ) |> 
+  addScaleBar(position = c("bottomleft"))
+```
+
+Using the same approach to create maps with the lower and upper limits of the prevalence predictions:
+```{r fig.cap="Map of lower limit of 95% CI of malaria prevalence in The Gambia."}
+r_prev_ll <- terra::rasterize(
+  x = sv, y = ra,
+  field = "prev_ll",
+  fun = mean
+) 
+
+leaflet() |> 
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  addRasterImage(
+    r_prev_ll,
+    colors = pal,
+    opacity = 0.5
+  ) |> 
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = values(r_prev_ll),
+    title = "LL"
+  ) |> 
+  addScaleBar(position = c("bottomright"))
+```
+
+Plot for the upper limit: 
+```{r fig.cap="Map of upper limit of 95% CI of malaria prevalence in The Gambia."}
+r_prev_ul <- terra::rasterize(
+  x = sv, y = ra,
+  field = "prev_ul",
+  fun = mean
+)
+
+leaflet() |> 
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  addRasterImage(
+    r_prev_ul,
+    colors = pal,
+    opacity = 0.5
+  ) |> 
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = values(r_prev_ul),
+    title = "UL"
+  ) |> 
+  addScaleBar(position = c("bottomleft"))
+```
+
+
+## Mapping exeedance probabilities
+
+This answers the question "What are the probabilities that malaria prevalence is greater than a particular threshold?"
+
+Calculating the exeedance probabilities if the threshold is 20%:
+```{r}
+index <- inla.stack.index(stack = stk.full, tag = "pred")$data
+
+1 - inla.pmarginal(
+  q = 0.2,
+  marginal = res$marginals.fitted.values[index][[1]]
+)
+```
+
+Computing the exceedance probabilities for all the prediction locations using the `sapply()` function:
+```{r}
+excprob <- sapply(
+  res$marginals.fitted.values[index],
+  FUN = function(marg){1 - inla.pmarginal(q = 0.20, marginal = marg)}
+)
+
+head(excprob)
+```
+
+
+Making maps of the exceedance probabilities by creating a raster with exceedance probabilities using `rasterize()` and `leaflet()`:
+```{r fig.cap="Map of malaria probability prevalence in The Gambia exceeding 20%"}
+sv$excprob <- excprob
+r_excprob <- terra::rasterize(
+  x = sv, y = ra,
+  field = "excprob",
+  fun = mean
+)
+
+pal <- colorNumeric("viridis", c(0, 1), na.color = "transparent")
+
+leaflet() |> 
+  addProviderTiles(providers$CartoDB.Positron) |> 
+  addRasterImage(
+    r_excprob,
+    colors = pal,
+    opacity = 0.5
+  ) |> 
+  addLegend(
+    "bottomright",
+    pal = pal,
+    values = values(r_excprob),
+    title = "P(p>0.2)"
+  ) |> 
+  addScaleBar(position = c("bottomleft"))
+```
+
+
+

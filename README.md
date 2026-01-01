@@ -10,7 +10,7 @@ Notes and R code resulting from coding along with Paula Moraga through her book 
 - [x] `6. Spatial Modeling of Areal Data`
 - [x] `7. Spatio-Temporal Modeling of Areal Data`
 - [x] `8. Geostatistical Data` 
-- [ ] `9. Spatial Modeling of Geostatistical Data` 
+- [x] `9. Spatial Modeling of Geostatistical Data` 
 - [ ] `10. Spatio-Temporal Modeling of Geostatistical Data` 
 - [ ] `11. Introduction to R Markdown`
 - [ ] `12. Building a Dashboard to Visualize Spatial Data`
