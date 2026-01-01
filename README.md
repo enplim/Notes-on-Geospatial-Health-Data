@@ -8,7 +8,7 @@ Notes and R code resulting from coding along with Paula Moraga through her book 
 - [x] `4. The R-INLA Package`
 - [x] `5. Areal Data`
 - [x] `6. Spatial Modeling of Areal Data`
-- [ ] `7. Spatio-Temporal Modeling of Areal Data`
+- [x] `7. Spatio-Temporal Modeling of Areal Data`
 - [ ] `8. Geostatistical Data` 
 - [ ] `9. Spatial Modeling of Geostatistical Data` 
 - [ ] `10. Spatio-Temporal Modeling of Geostatistical Data` 
