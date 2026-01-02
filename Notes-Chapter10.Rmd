@@ -1,0 +1,68 @@
+---
+title: "Notes on Chapter 10"
+author: "The Caveman Coder"
+date: "2026-01-02"
+output: html_document
+---
+
+
+# Chapter 10 - Spatio-temporal modeling of geostatistical data: Air pollution in Spain
+
+Aim: Show how to fit a spatio-temporal model to predict the particulate air pollution levels ($PM_{2.5}$) in Spain from data collected from 2015 to 2017 using the stochastic partial differential equation (SPDE) in the **R-INLA** package.  
+
+
+## Map
+
+Obtaining the map of Spain using the `getData()` function from the **raster** package:
+```{r, fig.cap="Map of Spain."}
+library(lwgeom)
+library(geodata)
+
+# getData is removed. Using `geodata` 
+m <- gadm("Spain", level = 0)
+
+
+plot(m)
+```
+
+Note: `getData()` is deprecated. Used `geodata::gadm()` instead. 
+
+Removing the islands from the map (retaining the Spanish mainland only):
+```{r}
+library(sf)
+library(dplyr)
+
+m <- m |> st_as_sf() |> 
+  st_cast("POLYGON")
+
+m$area <- st_area(m) 
+m <- m |> arrange(desc(area)) |> 
+  slice(1)
+head(m)
+```
+
+Plotting the Spanish mainland:
+```{r, fig.cap="Map of Spain without islands."}
+library(ggplot2)
+
+ggplot(m) +
+  geom_sf() +
+  theme_bw()
+```
+
+Transforming the map coordinate system to UTM projection (because we intend to work with meters):
+```{r, fig.cap="Map of Spain without islands and with UTM projection."}
+m <- m |> st_transform(25830)
+m |> ggplot() +
+  geom_sf() +
+  coord_sf(datum = st_crs(m)) +
+  theme_bw()
+```
+
+Note: the ESPG code for Spain is 25830.
+
+I cannot find the data for this chapter. (dataPM25.csv)
+
+
+
+
