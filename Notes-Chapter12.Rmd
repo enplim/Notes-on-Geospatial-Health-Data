@@ -1,0 +1,167 @@
+---
+title: "Notes on Chapter 12"
+author: "The Caveman Coder"
+date: "2026-01-03"
+output: html_document
+---
+
+# Building a dashboard to visualize spatial data with **flexdashboard**
+
+Dashboards are tools for effective data visualization that help communicate information in an intuitive and insightful manner,and are essential to support data-driven decision making.  
+
+
+## The R package **flexdashboard**
+
+Brief review of R Markdown...
+
+### R Markdown
+
+- allows easy work reproducibility by including R code that generates results, and narrative text explaining the work. 
+
+When the Markdown file is complied, the R code is executed and the results are appended to a report that can take a variety of formats including HTML and PDF.
+
+### Layout
+
+xxx
+
+### Dashboard components
+
+A flexdashboard can include these components:
+- Interactive JavaScript data visualizations based on HTML widgets  
+- Charts created with standard R graphics  
+- Simple tables created with `knitr::kable()`  
+- Interactive tables created with the **DT** package  
+- Value boxes created with the `valueBox()` function  
+- Gauges that display values on a meter  
+- Text, images, and equations  
+- Navigation bar with links to source code, websites, and other tools related to the dashboard.  
+
+## A dashboard to visualize global air pollution
+
+### Data
+
+Map data for this exercise come from **rnaturalearth**.
+```{r, fig.cap="World map obtained from the **rnaturalearth** package."}
+library(sf)
+library(rnaturalearth)
+
+map <- ne_countries(returnclass = "sf")
+names(map)[names(map) == "iso_a3"] <- "ISO3"
+names(map)[names(map) == "name"] <- "NAME"
+
+head(map)
+plot(map)
+```
+
+Obtaining $PM_{2.5}$ concentration levels from the **wbstats** package:
+```{r}
+library(wbstats)
+indicators <- wb_search(pattern = "pollution")
+
+head(indicators)
+```
+
+Downloading the 2016 data whose `indicator_id` is `EN.ATM.PM25.MC.M3` using the `wb_data()` function:
+```{r}
+d <- wb_data(
+  indicator = "EN.ATM.PM25.MC.M3",
+  start_date = 2016,
+  end_date = 2016
+)
+
+head(d)
+```
+
+Assigning the $PM_{2.5}$ readings from `d` to `map` where the country matches, using the `match()` function:
+```{r}
+map$PM2.5 <- d[match(map$ISO3, d$iso3c), ]$EN.ATM.PM25.MC.M3
+head(map)
+```
+
+
+### Table using **DT**
+
+Creating an interactive table using the `datatable()` function from the **DT** package:
+```{r, fig.cap="Table with the $PM_{2.5}$ values."}
+library(DT)
+
+DT::datatable(
+  map[, c("ISO3", "NAME", "PM2.5")],
+  rownames = FALSE,
+  options = list(pageLength = 10)
+)
+```
+
+
+### Map using **leaflet**
+
+Creating an interactive map using **leaflet**:
+```{r, fig.cap="Leaflet map with the $PM_{2.5}$ values."}
+library(leaflet)
+
+pal <- colorBin(
+  palette = "viridis", domain = map$PM2.5,
+  bins = seq(0, max(map$PM2.5, na.rm = TRUE) + 10, by = 10)
+)
+
+
+map$labels <- paste0(
+  "<strong> Country: </strong> ",
+  map$NAME, "<br/> ",
+  "<strong> PM2.5: </strong> ",
+  map$PM2.5, "<br/> "
+) %>%
+  lapply(htmltools::HTML)
+
+leaflet(map) |> 
+  addTiles() |> 
+  setView(lng = 0, lat = 30, zoom = 2) |> 
+  addPolygons(
+    fillColor = ~ pal(PM2.5),
+    color = "white",
+    fillOpacity = 0.7,
+    label = ~labels,
+    highlight = highlightOptions(
+      color = "black",
+      bringToFront = TRUE
+    )
+  ) |> 
+  leaflet::addLegend(
+    pal = pal, values = ~PM2.5,
+    opacity = 0.7, title = "PM2.5"
+  )
+```
+
+### Histogram using **ggplot2**
+
+Creating a histogram with the $PM_{2.5}$ values using `ggplot()`:
+```{r, fig.cap="Histogram of the $PM_{2.5}$ values."}
+library(ggplot2)
+
+map |> ggplot(
+  aes(x = PM2.5)
+) +
+  geom_histogram()
+```
+
+### R Markdown structure. YAML header and layout
+
+In the YAML header, we should specify the desired title and the output (`flexdashboard::flex_dashboard`) in this case.  Columns are specified using `--------------------`. The components to be included are specified by using `###`. Column width can be specified as 600 pixels using `Column {data-width=600}`. Paste the desired R code below the column name.  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -12,7 +12,7 @@ Notes and R code resulting from coding along with Paula Moraga through her book 
 - [x] `8. Geostatistical Data` 
 - [x] `9. Spatial Modeling of Geostatistical Data` 
 - [x] `10. Spatio-Temporal Modeling of Geostatistical Data` 
-- [ ] `11. Introduction to R Markdown`
+- [x] `11. Introduction to R Markdown`
 - [ ] `12. Building a Dashboard to Visualize Spatial Data`
 - [ ] `13. Introduction to Shiny`
 - [ ] `14. Interactive Dashboards`
